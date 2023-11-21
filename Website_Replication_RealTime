@@ -1,0 +1,139 @@
+library(Rlab)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(gridExtra)
+library(ggpubr)
+library(gganimate)
+library(ggridges)
+library(tidyverse)
+library(transformr)
+library(RColorBrewer)
+library(gt)
+
+
+# Version 1  -> Conversion of 0.1%
+# Version 2 -> Conversion of 0.11%
+
+df_tr <- list()
+
+#Just to get the same result
+set.seed(1995)
+
+#Simulating this scenario 10 times
+for(y in 1:10)
+  
+{
+  
+  
+  post_v1 <- rbeta(1,1,1)
+  post_v2 <- rbeta(1,1,1)
+  
+  n_v1 <- 1
+  n_v2 <- 1
+  
+  r_v1 <- 1
+  r_v2 <- 1
+  
+  tt <- c()
+  tt_v1 <- c()
+  tt_v2 <- c()
+  
+  tt_aux_max <- c()
+  
+  mc_pr <- 0
+  mc_pr_ct <- 0
+  j <- 0
+  
+  
+  while(mc_pr < 0.95)
+  {
+    j <- j + 1
+    
+    s <- c(post_v1,post_v2)
+    aux_max_s <- max(s) #Normal Thompson Sampling
+    aux_s <- which.max(s) #Normal Thompson Sampling
+    
+    
+    r <- ifelse(aux_s == 1, rbern(1,0.001), rbern(1,0.0011))
+    
+    
+    n_v1 <- n_v1 + ifelse(aux_s == 1, 1, 0)
+    n_v2 <- n_v2 + ifelse(aux_s == 2, 1, 0)
+    
+    r_v1 <- r_v1 + ifelse(aux_s == 1, r, 0)
+    r_v2 <- r_v2 + ifelse(aux_s == 2, r, 0)
+    
+    
+    post_v1 <- rbeta(1,r_v1 + 1, n_v1 + 1 - r_v1)
+    post_v2 <- rbeta(1,r_v2 + 1, n_v2 + 1 - r_v2)
+    
+    tt[j] <- j
+    hjk <- c()
+    
+    #Monte Carlo Probability
+    
+    for( i in 1: 1000)
+    {
+      post_v1 <- rbeta(1,r_v1 + 1, n_v1 + 1 - r_v1)
+      post_v2 <- rbeta(1,r_v2 + 1, n_v2 + 1 - r_v2)
+      
+      hjk[i] <- which.max(c(post_v1,post_v2))
+    }
+    
+    tt_v1[j] <- length(which(hjk == 1)) / 1000
+    
+    tt_v2[j] <- length(which(hjk == 2)) / 1000
+    
+    
+    mc_pr <- max(tt_v1[j], tt_v2[j])
+
+    #Just to follow the progress
+    if(j%%1000 == 0){print(list(j,mc_pr,y))}
+    
+  }
+  
+  
+  df_t <- data.frame(Tempo = tt,
+                     Prob_V1 = tt_v1,
+                     Prob_V2 = tt_v2)
+  #Prob_V3 = tt_v3)
+  
+  df_g_mt <- df_t %>% select(Tempo,Prob_V1,Prob_V2) %>% #,Prob_V3) %>%
+    pivot_longer(cols = !Tempo,
+                 names_to = "Website_Version",
+                 values_to = "Probability")
+  
+  df_tr[[y]] <- df_g_mt
+  
+}
+
+# Stacking the results
+
+df_tr_stack <- bind_rows(df_tr, .id = "Simulation" )
+
+df_qt <- df_tr_stack %>%
+  group_by(Simulation) %>%
+  summarise(Number_Observations = n() / 2)
+summary(df_qt$Number_Observations)
+
+
+df_tr_S6 <- filter(df_tr_stack,Simulation %in% c(4,6,8)) %>%
+            mutate(Version = ifelse(Website_Version == "Prob_V1","V1(p = 0.1%)", "V2(p = 0.11%)"))
+
+
+#Monte Carlo Probability Graph
+ggplot(data = df_tr_S6, aes(x = Tempo/1000, y = Probability, color = Version )) +
+           geom_line()+
+           geom_hline(aes(yintercept = 0.95), linetype='dotted') +
+           theme_classic() +
+           labs(title = "Monte Carlo Probability step by step",
+                x = "Number of Observations (K)") +
+          facet_grid(Simulation ~ .)
+
+
+#Box-Plot Number of Observations
+ggplot(data = df_qt, aes(y = Number_Observations)) +
+  geom_boxplot(size = 0.5, fill = "#317191") + 
+  theme_classic() + 
+  labs(title = "Log Number of Observations required", x = "10 Simulations")
